@@ -69,9 +69,13 @@ module Multiplexing =
         loop ()
 
     let proxySocketWithPipe (source:System.Net.Sockets.Socket) (destination:System.Net.Sockets.Socket) =
-        let pipe = Pipe ()
-        fillPipeFromSocket source pipe.Writer <*>
-        readPipe pipe.Reader (fillSocketFromPipe destination)
+        job {
+            let pipe = Pipe ()
+            let! _ =
+                fillPipeFromSocket source pipe.Writer <*>
+                readPipe pipe.Reader (fillSocketFromPipe destination)
+            destination.Close ()
+        }
 
 module Program =
     open Hopac.Infixes
