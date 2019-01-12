@@ -1,0 +1,7 @@
+bin/
+obj/
+packages/
+paket-files/
+.idea/
+.vscode/
+.fake/

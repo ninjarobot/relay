@@ -7,9 +7,7 @@ open System
 open System.Buffers
 
 module Multiplexing =
-    let hello name =
-        run <| Job.fromAsync (async { printfn "Hello" })
-        printfn "Hello %s" name
+    open Hopac.Infixes
     
     let fillPipeFromSocket (socket:Socket) (writer:PipeWriter) =
         let minBufferSize = 512
@@ -18,8 +16,8 @@ module Multiplexing =
                 let memory = writer.GetMemory minBufferSize
                 try
                     let! bytesRead = (fun () -> socket.ReceiveAsync(memory, SocketFlags.None).AsTask() ) |> Job.fromTask
+                    writer.Advance bytesRead
                     if bytesRead <> 0 then
-                        writer.Advance bytesRead
                         let! flushResult = (fun () -> writer.FlushAsync().AsTask()) |> Job.fromTask
                         if not flushResult.IsCompleted then
                             do! iter ()
@@ -71,15 +69,17 @@ module Multiplexing =
         loop ()
 
     let proxySocketWithPipe (source:System.Net.Sockets.Socket) (destination:System.Net.Sockets.Socket) =
-        job {
-            let pipe = Pipe ()
-            do! fillPipeFromSocket source pipe.Writer
-            do! readPipe pipe.Reader (fillSocketFromPipe destination)
-        }
+        let pipe = Pipe ()
+        fillPipeFromSocket source pipe.Writer <*>
+        readPipe pipe.Reader (fillSocketFromPipe destination)
 
 module Program =
     open Hopac.Infixes
     open System.Net
+    
+    type ProxyType =
+        | UseStream
+        | UsePipe
     
     [<EntryPoint>]    
     let main argv =
@@ -96,8 +96,10 @@ module Program =
             let sourceSocket = client.Client
             let targetSocket = target.Client
             
-            let clientToTarget = Multiplexing.proxyStreams (client.GetStream()) (target.GetStream())
-            let targetToClient = Multiplexing.proxyStreams (target.GetStream()) (client.GetStream())
+            let clientToTarget = Multiplexing.proxySocketWithPipe sourceSocket targetSocket
+                //Multiplexing.proxyStreams (client.GetStream()) (target.GetStream())
+            let targetToClient = Multiplexing.proxySocketWithPipe targetSocket sourceSocket
+                //Multiplexing.proxyStreams (target.GetStream()) (client.GetStream())
             
             try
                 clientToTarget <*> targetToClient |> run |> ignore
